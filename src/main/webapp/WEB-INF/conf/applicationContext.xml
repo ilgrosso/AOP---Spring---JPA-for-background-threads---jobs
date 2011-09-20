@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans  xmlns="http://www.springframework.org/schema/beans"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns:tx="http://www.springframework.org/schema/tx"
+        xmlns:aop="http://www.springframework.org/schema/aop"
+        xmlns:context="http://www.springframework.org/schema/context"
+        xsi:schemaLocation="http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/tx
+        http://www.springframework.org/schema/tx/spring-tx.xsd
+        http://www.springframework.org/schema/context
+        http://www.springframework.org/schema/context/spring-context.xsd
+        http://www.springframework.org/schema/aop
+        http://www.springframework.org/schema/aop/spring-aop.xsd">    
+
+    <!-- The datasource -->
+    <bean id="dataSource" class="com.mchange.v2.c3p0.ComboPooledDataSource" destroy-method="close">
+        <property name="driverClass" value="org.hsqldb.jdbcDriver" />
+        <property name="jdbcUrl" value="jdbc:hsqldb:mem:syncopedb" />
+        <property name="user" value="sa" />
+        <property name="password" value=""/>
+    </bean>
+
+    <bean id="entityManagerFactory"
+          class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean">
+        <property name="persistenceUnitName" value="persistenceUnit"/>
+        <property name="dataSource" ref="dataSource"/>
+        <property name="jpaVendorAdapter">
+            <bean class="org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter">
+                <property name="showSql" value="false"/>
+                <property name="generateDdl" value="true"/>
+                <property name="databasePlatform" value="org.hibernate.dialect.HSQLDialect"/>
+            </bean>
+        </property>
+    </bean>
+
+    <bean id="entityManager"
+          class="org.springframework.orm.jpa.support.SharedEntityManagerBean">
+        <property name="entityManagerFactory" ref="entityManagerFactory"/>
+    </bean>    
+
+    <!-- The JPA interceptor, which takes care of opening and closing hibernate session around method calls. -->
+    <bean id="jpaInterceptor" class="org.springframework.orm.jpa.JpaInterceptor">
+        <property name="entityManagerFactory" ref="entityManagerFactory"/>
+    </bean>
+
+    <!-- The quartz scheduler in charge of running background jobs -->
+    <bean class="org.springframework.scheduling.quartz.SchedulerFactoryBean" destroy-method="destroy">
+        <property name="triggers">
+            <list>
+                <ref bean="testBackgroundJobTrigger"/>
+            </list>
+        </property>
+        <property name="quartzProperties">
+            <props>
+                <prop key="org.quartz.threadPool.class">org.quartz.simpl.SimpleThreadPool</prop>
+                <prop key="org.quartz.threadPool.threadCount">20</prop>
+                <prop key="org.quartz.threadPool.threadPriority">2</prop>
+            </props>
+        </property>
+    </bean>
+
+    <!-- A trigger bean with config info on how to run the background job -->
+    <bean id="testBackgroundJobTrigger" class="org.springframework.scheduling.quartz.SimpleTriggerBean">
+        <property name="jobDetail" ref="testBackgroundJobDetail"/>
+        <property name="startDelay" value="10000"/>
+        <property name="repeatInterval" value="10000" />
+    </bean>
+
+    <!-- The actual background job impl that we're going to run -->
+    <bean id="testBackgroundJob" class="com.blogspot.chicchiricco.util.jobs.impl.TestBackgroundJobImpl">
+        <property name="testEntityDAO" ref="testEntityDAOImpl"/>
+    </bean>
+
+    <!-- A proxy with the hibernate interceptor wired in so it can access the persistent context -->
+    <bean id="testBackgroundJobProxy" class="org.springframework.aop.framework.ProxyFactoryBean">
+        <property name="target">
+            <ref bean="testBackgroundJob"/>
+        </property>
+        <property name="proxyInterfaces">
+            <value>java.lang.Runnable</value>
+        </property>
+        <property name="interceptorNames">
+            <value>jpaInterceptor</value>
+        </property>
+    </bean>
+
+    <!-- Detail info about the job -->
+    <bean id="testBackgroundJobDetail" class="org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean">
+        <property name="targetObject" ref="testBackgroundJobProxy"/>
+        <property name="targetMethod" value="run"/>
+        <property name="concurrent" value="false"/>
+    </bean>
+    
+    <context:annotation-config/>
+    <context:component-scan base-package="com.blogspot.chicchiricco.persistence.dao"/>
+    
+    <tx:annotation-driven/>
+    <bean id="transactionManager"
+          class="org.springframework.orm.jpa.JpaTransactionManager">
+        <property name="entityManagerFactory" ref="entityManagerFactory"/>
+    </bean>
+
+</beans>
